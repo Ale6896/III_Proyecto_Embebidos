@@ -18,8 +18,8 @@ const int MEMORY_SIZE = 1023; // Total EEPROM size is 1024 bytes, but we leave 2
 unsigned long previousTemperatureMillis = 0;
 unsigned long previousStoreMillis = 0;
 const unsigned long temperatureInterval = 1000; // Read temperature every 1 seconds
-const unsigned long storeInterval = 2000;      // Store data every 2 seconds
-float treshold = 20.0;
+const unsigned long storeInterval = 10000;      // Store data every 2 seconds
+float treshold = 24.0;
 
 bool storeTemperatureFlag = false;
 float temperatureValue;
@@ -55,16 +55,62 @@ void setup() {
     EEPROM.write(1, endAddress);
   }
 
-  // Print the current pointer values
-  Serial.print("Next address: ");
-  Serial.println(nextAddress);
-  Serial.print("End address: ");
-  Serial.println(endAddress);
+  storeData("20230615224532",true);
+
 }
 
 
 
 void loop() {
+
+  if (Serial.available() > 0) {
+    Serial.println("Starting...");
+    // Read the incoming data from the serial port
+    String msg = Serial.readString();
+    char command = msg[0];
+    String b = msg.substring(1);
+
+
+    // Update date and time
+    if (command == 'D'){ 
+      // Store the received data (datetime)
+      storeData(b, true);
+    }
+
+    // Ask for saved data
+    else if (command == 'A'){
+
+      int nextAddress = EEPROM.read(0);
+      // Print the stored data
+      // Calculate the length of the data
+      int dataLength = nextAddress - 2;
+
+      // Create a buffer to store the data
+      uint8_t buffer[dataLength];
+      // Read data from EEPROM and store it in the buffer
+      for (int i = 2; i < nextAddress; i++) {
+        buffer[i - 2] = EEPROM.read(i);
+        // You can perform any additional processing here
+      }
+
+      Serial.write(buffer, nextAddress);
+      
+      
+      //clearMemory();
+    }
+
+    // Update Treshold
+    else if (command == 'T'){
+      // Falta revizar si funciona
+
+      String T = b;
+      treshold = T.toFloat();
+      Serial.println(msg);
+      lcd.clear();
+      lcd.print(treshold);
+    }
+   
+  }
   // Read temperature from the DHT22 sensor every 10 seconds
   unsigned long currentMillis = millis();
 
@@ -82,43 +128,7 @@ void loop() {
   }
 
   activateIrrigation(temperatureValue);
-  
 
-  if (Serial.available()) {
-    // Read the incoming data from the serial port
-    String receivedData = Serial.readStringUntil('\n');
-
-    // Remove any leading or trailing whitespace
-    receivedData.trim();
-
-    // Update date and time
-    if (receivedData[0] == 'D'){ 
-      // Store the received data (datetime)
-      storeData(receivedData.substring(1), true);
-    }
-
-    // Ask for saved data
-    else if (receivedData[0] == 'A'){
-
-      int nextAddress = EEPROM.read(0);
-      // Print the stored data
-      Serial.print("Stored data: ");
-      for (int i = 2; i < nextAddress; i++) {
-      char data = char(EEPROM.read(i));
-      Serial.print(data);
-      clearMemory();
-      // Debe recibir tambien la fecha actualizada
-  }
-    }
-
-    // Update Treshold
-    else if (receivedData[0] == 'T'){
-      // Falta revizar si funciona
-      String T = receivedData.substring(1);
-      treshold = T.toFloat();
-    }
-   
-  }
 }
 
 void readTemperature(){
@@ -128,6 +138,10 @@ void readTemperature(){
     lcd.clear();
     lcd.print("Temp: ");
     lcd.print(temperature);
+    lcd.print(" *C");
+    lcd.setCursor(0,1);
+    lcd.print("Tresh: ");
+    lcd.print(treshold);
     lcd.print(" *C");
 
     // Check if the temperature reading is valid
@@ -164,31 +178,7 @@ void storeData(const String& receivedData, bool isDateTime) {
     
   }
 
-  // Store the end address of the received data
-  EEPROM.write(1, nextAddress);
-
-  // Update the stored next address value in the first memory address
-  EEPROM.write(0, nextAddress);
-
-  // Print the stored data
-  Serial.print("Stored data: ");
-  for (int i = 2; i < nextAddress; i++) {
-    char data = char(EEPROM.read(i));
-    Serial.print(data);
-  }
-  Serial.println();
-
-  // Print additional information depending on the data type
-  if (isDateTime) {
-    Serial.print("Datetime stored: ");
-    Serial.println(receivedData);
-  } else {
-    Serial.print("Temperature stored: ");
-    Serial.print(receivedData);
-    Serial.println(" °C");
-     Serial.print("End address: ");
-    Serial.println(endAddress);
-  }
+  
 }
 
 void storeTemperature(float temperatureValue, int counter){
