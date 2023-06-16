@@ -1,6 +1,7 @@
 #include <EEPROM.h>
 #include <DHT.h>
 #include <LiquidCrystal.h>
+#include <Arduino_FreeRTOS.h>
 
 #define DHTPIN 2      // Pin where the DHT22 sensor is connected
 #define DHTTYPE DHT22 // DHT sensor type
@@ -25,6 +26,14 @@ bool storeTemperatureFlag = false;
 float temperatureValue;
 int counter = 0;
 
+TaskHandle_t sendReceiveTaskHandle;
+TaskHandle_t temperatureTaskHandle;
+TaskHandle_t storeDataTaskHandle;
+
+void sendReceiveTask(void* pvParameters);
+void temperatureTask(void* pvParameters);
+void storeDataTask(void* pvParameters);
+
 void setup() {
   // Initialize the serial communication
   Serial.begin(9600);
@@ -34,7 +43,7 @@ void setup() {
   // Initialize the DHT sensor
   dht.begin();
 
-  clearMemory();
+  //clearMemory();
 
   pinMode(LED_PIN, OUTPUT);
 
@@ -55,7 +64,14 @@ void setup() {
     EEPROM.write(1, endAddress);
   }
 
-  storeData("20230615224532",true);
+
+  // Create tasks
+  xTaskCreate(sendReceiveTask, "SendReceiveTask", 128, NULL, 2, &sendReceiveTaskHandle);
+  xTaskCreate(temperatureTask, "TemperatureTask", 128, NULL, 3, &temperatureTaskHandle);
+  xTaskCreate(storeDataTask, "StoreDataTask", 128, NULL, 1, &storeDataTaskHandle);
+
+  // Start the scheduler
+  vTaskStartScheduler();
 
 }
 
@@ -63,94 +79,7 @@ void setup() {
 
 void loop() {
 
-  if (Serial.available() > 0) {
-    Serial.println("Starting...");
-    // Read the incoming data from the serial port
-    String msg = Serial.readString();
-    char command = msg[0];
-    String b = msg.substring(1);
-
-
-    // Update date and time
-    if (command == 'D'){ 
-      // Store the received data (datetime)
-      storeData(b, true);
-    }
-
-    // Ask for saved data
-    else if (command == 'A'){
-
-      int nextAddress = EEPROM.read(0);
-      // Print the stored data
-      // Calculate the length of the data
-      int dataLength = nextAddress - 2;
-
-      // Create a buffer to store the data
-      uint8_t buffer[dataLength];
-      // Read data from EEPROM and store it in the buffer
-      for (int i = 2; i < nextAddress; i++) {
-        buffer[i - 2] = EEPROM.read(i);
-        // You can perform any additional processing here
-      }
-
-      Serial.write(buffer, nextAddress);
-      
-      
-      //clearMemory();
-    }
-
-    // Update Treshold
-    else if (command == 'T'){
-      // Falta revizar si funciona
-
-      String T = b;
-      treshold = T.toFloat();
-      Serial.println(msg);
-      lcd.clear();
-      lcd.print(treshold);
-    }
-   
-  }
-  // Read temperature from the DHT22 sensor every 10 seconds
-  unsigned long currentMillis = millis();
-
-  if (currentMillis - previousTemperatureMillis >= temperatureInterval) {
-    readTemperature();
-    previousTemperatureMillis = currentMillis;    
-  }
-
-     // Store the temperature every 60 seconds
-  if (currentMillis - previousStoreMillis >= storeInterval) {
-    previousStoreMillis = currentMillis;
-    storeTemperatureFlag = true;
-    counter += 1;
-    storeTemperature(temperatureValue, counter); 
-  }
-
-  activateIrrigation(temperatureValue);
-
 }
-
-void readTemperature(){
-  
-  float temperature = dht.readTemperature();
-
-    lcd.clear();
-    lcd.print("Temp: ");
-    lcd.print(temperature);
-    lcd.print(" *C");
-    lcd.setCursor(0,1);
-    lcd.print("Tresh: ");
-    lcd.print(treshold);
-    lcd.print(" *C");
-
-    // Check if the temperature reading is valid
-    if (!isnan(temperature)) {
-      temperatureValue = temperature;
-    }
-
-}
-
 
 void clearMemory(){
   for (int i = 0; i < EEPROM.length();i++){
@@ -177,11 +106,102 @@ void storeData(const String& receivedData, bool isDateTime) {
     }
     
   }
-
-  
+ 
 }
 
-void storeTemperature(float temperatureValue, int counter){
+void sendReceiveTask(void* pvParameters) {
+    (void) pvParameters;
+   for (;;){ // A Task shall never return or exit.
+
+
+  if (Serial.available() > 0) {
+    // Read the incoming data from the serial port
+    String msg = Serial.readStringUntil('\n');
+    char command = msg[0];
+    String b = msg.substring(1);
+
+
+    // Update date and time
+    if (command == 'D'){ 
+      // Store the received data (datetime)
+      storeData(b, true);
+    }
+
+    // Ask for saved data
+    else if (command == 'A'){
+
+      int nextAddress = EEPROM.read(0);
+      // Print the stored data
+      // Calculate the length of the data
+      int dataLength = nextAddress - 2;
+
+      // Create a buffer to store the data
+      uint8_t buffer[dataLength];
+      // Read data from EEPROM and store it in the buffer
+      for (int i = 2; i < nextAddress; i++) {
+        buffer[i - 2] = EEPROM.read(i);
+        // You can perform any additional processing here
+      }
+
+      Serial.write(buffer, nextAddress);      
+      
+      //clearMemory();
+    }
+
+    // Update Treshold
+    else if (command == 'T'){
+      lcd.print(b);
+
+      String T = b;
+      treshold = T.toFloat();
+      lcd.clear();
+      lcd.print(treshold);
+    }
+
+    vTaskDelay( 10 / portTICK_PERIOD_MS ); 
+  }
+  // Read temperature from the DHT22 sensor every 10 seconds
+  unsigned long currentMillis = millis();
+
+  }
+}
+
+void temperatureTask(void* pvParameters) {
+    (void) pvParameters;
+   for (;;){ // A Task shall never return or exit.
+    
+  float temperature = 25.0;//dht.readTemperature();
+
+    lcd.clear();
+    lcd.print("Temp: ");
+    lcd.print(temperature);
+    lcd.print(" *C");
+    lcd.setCursor(0,1);
+    lcd.print("Tresh: ");
+    lcd.print(treshold);
+    lcd.print(" *C");
+
+    // Check if the temperature reading is valid
+    if (!isnan(temperature)) {
+      temperatureValue = temperature;
+    }
+
+    if (temperatureValue >= treshold){
+      digitalWrite(LED_PIN, HIGH);
+    }
+    else{
+      digitalWrite(LED_PIN, LOW);
+    }
+
+    vTaskDelay( 2000 / portTICK_PERIOD_MS ); 
+  }
+}
+
+
+void storeDataTask(void* pvParameters) {
+    (void) pvParameters;
+   for (;;){ // A Task shall never return or exit.
+
     String temperatureString = 'T' + String(temperatureValue*10, 0); // 2 decimal places
 
     // Store the temperature data
@@ -192,13 +212,8 @@ void storeTemperature(float temperatureValue, int counter){
 
     // Store counter
     storeData('C' + String(counter), false);
+
+    vTaskDelay( 600000 / portTICK_PERIOD_MS ); 
+  }
 }
 
-void activateIrrigation(float temperatureValue){
-  if (temperatureValue >= treshold){
-    digitalWrite(LED_PIN, HIGH);
-  }
-  else{
-    digitalWrite(LED_PIN, LOW);
-  }
-}
